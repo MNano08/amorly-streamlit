@@ -2,7 +2,7 @@ import streamlit as st
 from supabase import create_client
 import json
 
-# 🔑 Your Supabase credentials here
+# 🔑 Supabase credentials
 url = "https://gieqacigvysfoghrdcqj.supabase.co"
 key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpZXFhY2lndnlzZm9naHJkY3FqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE4ODM0NDMsImV4cCI6MjA2NzQ1OTQ0M30.ltaod_JhmV27DMkG_a1QMAYL3MCm5DHEiAowJPan8Po"
 supabase = create_client(url, key)
@@ -18,7 +18,7 @@ if selected_user:
     selected_email = selected_user.split("(")[-1][:-1]
     current_user = next(user for user in users_data if user["email"] == selected_email)
 
-    # Pull matches where the user is either user1 or user2
+    # Find all matches where the selected user is either user1 or user2
     matches_1 = supabase.table("matches").select("*").eq("user1_id", current_user["id"]).execute().data
     matches_2 = supabase.table("matches").select("*").eq("user2_id", current_user["id"]).execute().data
     matches_data = matches_1 + matches_2
@@ -27,7 +27,7 @@ if selected_user:
         shown_users = set()
 
         for match in matches_data:
-            # Figure out the *other* matched user
+            # Determine the matched user
             matched_user_id = match["user2_id"] if match["user1_id"] == current_user["id"] else match["user1_id"]
             if matched_user_id in shown_users:
                 continue
@@ -37,14 +37,21 @@ if selected_user:
             if not matched_user:
                 continue
 
-            score_data = match.get("compatibility_score", {})
-            score = score_data.get("score")
+            # Handle compatibility score
+            score_data = match.get("compatibility_score")
+            if isinstance(score_data, dict):
+                score = score_data.get("score")
+                match_type = score_data.get("match_type", "Unknown")
+                shared = score_data.get("shared_values", "None")
+            else:
+                score = score_data
+                match_type = "Unknown"
+                shared = "None"
+
             if score is None or score < 60:
                 continue
 
-            match_type = score_data.get("match_type", "Unknown")
-            shared = score_data.get("shared_values", "None")
-
+            # Format shared values cleanly
             if isinstance(shared, str):
                 try:
                     shared_list = json.loads(shared)
@@ -54,8 +61,10 @@ if selected_user:
                         shared_values = shared
                 except json.JSONDecodeError:
                     shared_values = shared
+            elif isinstance(shared, list):
+                shared_values = ", ".join(shared)
             else:
-                shared_values = ", ".join(shared) if isinstance(shared, list) else str(shared)
+                shared_values = str(shared)
 
             st.markdown(f"""
                 ### 💞 Match with {matched_user['first_name']}
@@ -63,6 +72,5 @@ if selected_user:
                 **Shared Values:** {shared_values if shared_values else "None"}  
                 **Compatibility Score:** {score}%
             """)
-
     else:
         st.info("No matches found.")
