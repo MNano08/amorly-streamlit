@@ -1,71 +1,58 @@
 import streamlit as st
 from supabase import create_client, Client
-import os
 import ast
 
-# Supabase setup
+# Load credentials from secrets
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
 
-st.title("💘 Amorly: Your Matches")
+st.title("💘 Your Matches")
 
-# Fetch users
-users_response = supabase.table("users").select("*").execute()
-users = users_response.data
+# Step 1: Load all users
+users_data = supabase.table("users").select("id", "first_name").execute().data
+user_lookup = {user["id"]: user["first_name"] for user in users_data}
 
-user_options = {f"{user['first_name']} ({user['email']})": user["id"] for user in users}
-selected_user_display = st.selectbox("Choose a user to view their matches:", list(user_options.keys()))
-selected_user_id = user_options[selected_user_display]
+# Step 2: Simulate login dropdown
+user_options = [user["first_name"] for user in users_data]
+selected_name = st.selectbox("Select your profile:", user_options)
+selected_id = [uid for uid, name in user_lookup.items() if name == selected_name][0]
 
-# Fetch matches where selected user is either user1 or user2
-match_response = (
-    supabase.table("matches")
-    .select("*")
-    .or_(f"user1_id.eq.{selected_user_id},user2_id.eq.{selected_user_id}")
-    .execute()
-)
-matches = match_response.data
+# Step 3: Load all matches involving this user
+match_data = supabase.table("matches").select("*").execute().data
 
-if not matches:
-    st.info("No matches found.")
+# Filter matches where selected user is user1 or user2
+filtered_matches = [m for m in match_data if m["user1_id"] == selected_id or m["user2_id"] == selected_id]
+
+if not filtered_matches:
+    st.warning("No matches found.")
 else:
-    shown_match_ids = set()
-    for match in matches:
-        match_id = match["id"]
-        if match_id in shown_match_ids:
-            continue
-        shown_match_ids.add(match_id)
+    for match in filtered_matches:
+        # Identify the matched person (not the logged-in user)
+        matched_user_id = match["user2_id"] if match["user1_id"] == selected_id else match["user1_id"]
+        matched_name = user_lookup.get(matched_user_id, "Unknown")
 
-        compatibility = match.get("compatibility_score")
-        if compatibility is None or compatibility < 60:
-            continue
-
-        # Figure out the other user (not the viewer)
-        user1 = match["user1_id"]
-        user2 = match["user2_id"]
-        matched_user_id = user2 if user1 == selected_user_id else user1
-        matched_user = next((u for u in users if u["id"] == matched_user_id), None)
-        if not matched_user:
-            continue
-
-        # Parse overlap_values safely
-        raw_values = match.get("overlap_values")
-        if isinstance(raw_values, str):
-            try:
-                parsed = ast.literal_eval(raw_values)
-                overlap_values = parsed if isinstance(parsed, list) else [v.strip() for v in raw_values.split(",")]
-            except:
-                overlap_values = [v.strip() for v in raw_values.split(",") if v.strip()]
-        elif isinstance(raw_values, list):
-            overlap_values = raw_values
-        else:
-            overlap_values = []
+        compatibility = match.get("compatibility_score", 0)
+        if compatibility < 60:
+            continue  # Skip low matches
 
         match_type = match.get("match_type", "Unknown")
+        raw_values = match.get("overlap_values", "")
+        
+        # Handle stringified lists like '["security","tradition"]'
+        try:
+            values = ast.literal_eval(raw_values)
+            if isinstance(values, list):
+                clean_values = ", ".join(values)
+            else:
+                clean_values = raw_values
+        except:
+            clean_values = raw_values
 
-        st.markdown(f"### 💞 Match with {matched_user['first_name']}")
-        st.markdown(f"**Match Type:** {match_type}")
-        st.markdown(f"**Shared Values:** {', '.join(overlap_values) if overlap_values else 'None'}")
-        st.markdown(f"**Compatibility Score:** {compatibility}%")
-        st.markdown("---")
+        st.markdown(f"""
+        ### 💑 Match with **{matched_name}**
+        - **Score:** {compatibility}%
+        - **Match Type:** {match_type}
+        - **Shared Values:** {clean_values if clean_values else "None"}
+        """)
+
